@@ -7,3 +7,4 @@ bots
 .env
 config.json
 data
+*.sqlite*

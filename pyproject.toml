@@ -3,7 +3,7 @@ name = "dclite"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "Hewitt",email = "wangh3@bxscience.edu"}
+    {name = "Your Name",email = "you@example.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.12,<4.0"
