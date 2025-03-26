@@ -16,7 +16,7 @@ TOKEN = os.getenv("TOKEN")
 DATA_CHANNEL = int(os.getenv("DATA_CHANNEL"))
 DM_CHANNEL = int(os.getenv("DM_CHANNEL"))
 
-chatbot = ChatBot("danielpark")
+chatbot = ChatBot("someguy")
 
 class MyClient(discord.Client):
     async def on_message(self, message: discord.Message):
@@ -44,8 +44,9 @@ async def main():
 
     if not os.path.isfile(messages_file):
         print("scraping channel")
-        async for message in channel.history(limit=4000):
-            messages.append(message.content)
+        async for message in channel.history(limit=8000, oldest_first=True):
+            if len(message.content) != 0:
+                messages.append(message.content)
 
         with open(messages_file, "a", encoding="utf-8") as file:
             for message in messages:
