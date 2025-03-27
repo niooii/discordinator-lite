@@ -8,3 +8,4 @@ bots
 config.json
 data
 *.sqlite*
+models

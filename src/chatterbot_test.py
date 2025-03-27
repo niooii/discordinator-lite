@@ -1,24 +1,29 @@
 import os
 import discord
-import time
 import asyncio
-import random
 from dotenv import load_dotenv
 from discord.channel import DMChannel
-import ssl 
+from dclite.data import DiscordDataset, DiscordDataSource
 
 from chatterbot import ChatBot
 
 from chatterbot.trainers import ListTrainer
 
 load_dotenv()
-TOKEN = os.getenv("TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+DATA_TOKEN = os.getenv("DATA_TOKEN")
 DATA_CHANNEL = int(os.getenv("DATA_CHANNEL"))
 DM_CHANNEL = int(os.getenv("DM_CHANNEL"))
 
 chatbot = ChatBot("someguy")
 
 class MyClient(discord.Client):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    async def on_ready(self):
+        print(f'Logged on as {self.user}!')
+
     async def on_message(self, message: discord.Message):
         if message.author.id == self.user.id:
             return
@@ -29,36 +34,38 @@ class MyClient(discord.Client):
             message = await message.reply(content=response)
             print(f"sent {message}");
 
+def test_chatbot():
+    while True:
+        user_msg = input("> ")
+        response = chatbot.get_response(user_msg)
+        print(f"bot: {response}")
+
+client = MyClient(chunk_guilds_at_startup=False, request_guilds=False)
+
 async def main():
-    client = MyClient()
 
-    await client.login(TOKEN)
-
-    channel: DMChannel = await client.fetch_channel(DATA_CHANNEL)
+    await client.login(BOT_TOKEN)
 
     trainer = ListTrainer(chatbot)
 
-    messages: list[str] = []
-
     messages_file = f"data/{DATA_CHANNEL}.txt"
 
-    if not os.path.isfile(messages_file):
-        print("scraping channel")
-        async for message in channel.history(limit=8000, oldest_first=True):
-            if len(message.content) != 0:
-                messages.append(message.content)
+    source = DiscordDataSource(DATA_TOKEN)
 
-        with open(messages_file, "a", encoding="utf-8") as file:
-            for message in messages:
-                file.write(message + "\n")
-                
-    else:
-        with open(messages_file, "r", encoding="utf-8") as file:
-            messages = file.readlines()
-        
+    dataset = DiscordDataset.load(messages_file)
 
-    trainer.train(messages)
+    if dataset is None:
+        dataset = await source.fetch(
+            DATA_CHANNEL, 
+            8000, 
+            True
+        )
+        dataset.save(messages_file)
 
-    await client.connect()
+    trainer.train(dataset.messages)
+
+    # await client.connect()
+
+    test_chatbot()
 
 asyncio.run(main())
