@@ -4,7 +4,7 @@ import asyncio
 from dotenv import load_dotenv
 from discord.channel import DMChannel
 from dclite.data import DiscordDataset, DiscordDataSource
-
+from dclite.chatbot import StupidAhhChatBot
 from chatterbot import ChatBot
 
 from chatterbot.trainers import ListTrainer
@@ -15,7 +15,9 @@ DATA_TOKEN = os.getenv("DATA_TOKEN")
 DATA_CHANNEL = int(os.getenv("DATA_CHANNEL"))
 DM_CHANNEL = int(os.getenv("DM_CHANNEL"))
 
-chatbot = ChatBot("someguy")
+MESSAGE_SEPARATOR = "[NEWLINE]"
+
+chatterbot = StupidAhhChatBot("chatterbot")
 
 class MyClient(discord.Client):
     def __init__(self, *args, **kwargs):
@@ -29,7 +31,7 @@ class MyClient(discord.Client):
             return
 
         if message.channel.id == DM_CHANNEL:
-            response = chatbot.get_response(message.content)
+            response = str(chatterbot.respond(message.content)).replace(MESSAGE_SEPARATOR, "\n")
             print(f"replying {response}")
             message = await message.reply(content=response)
             print(f"sent {message}");
@@ -37,34 +39,21 @@ class MyClient(discord.Client):
 def test_chatbot():
     while True:
         user_msg = input("> ")
-        response = chatbot.get_response(user_msg)
-        print(f"bot: {response}")
+        response = str(chatterbot.respond(user_msg))
+        print(f"bot: {response.replace(MESSAGE_SEPARATOR, "\n")}")
 
 client = MyClient(chunk_guilds_at_startup=False, request_guilds=False)
 
 async def main():
 
-    await client.login(BOT_TOKEN)
+    await client.start(BOT_TOKEN)
 
-    trainer = ListTrainer(chatbot)
+    # messages_file = f"data/{DATA_CHANNEL}.txt"
 
-    messages_file = f"data/{DATA_CHANNEL}.txt"
+    dataset = DiscordDataset.load("data/parri.json")
 
-    source = DiscordDataSource(DATA_TOKEN)
-
-    dataset = DiscordDataset.load(messages_file)
-
-    if dataset is None:
-        dataset = await source.fetch(
-            DATA_CHANNEL, 
-            8000, 
-            True
-        )
-        dataset.save(messages_file)
-
-    trainer.train(dataset.messages)
-
-    # await client.connect()
+    msgs_coalesced = dataset.messages_txt_raw_coalesced(separator=MESSAGE_SEPARATOR)
+    chatterbot.train(msgs_coalesced)
 
     test_chatbot()
 

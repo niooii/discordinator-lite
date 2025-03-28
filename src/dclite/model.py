@@ -1,4 +1,5 @@
 from enum import Enum
+import gc
 import torch
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
@@ -6,11 +7,15 @@ from transformers import (
     AutoTokenizer, 
     AutoModelForCausalLM,
     get_linear_schedule_with_warmup,
+    BitsAndBytesConfig
 )
+from huggingface_hub import login
 from tqdm import tqdm
 from typing import Optional, Dict, Any
 import os
 import json
+
+logged_in = False
 
 class ModelType(Enum):
     GPT2 = ("gpt2", "causal")
@@ -19,6 +24,8 @@ class ModelType(Enum):
     GPT_NEO = ("EleutherAI/gpt-neo-1.3B", "causal")
     OPT = ("facebook/opt-1.3b", "causal")
     BLOOM = ("bigscience/bloom-1b1", "causal")
+    LLAMA2 = ("meta-llama/Llama-2-7b-chat-hf", "causal")
+    LLAMA3 = ("meta-llama/Llama-3.2-1B", "causal")
 
 class ChatModel:
     def __init__(
@@ -27,6 +34,11 @@ class ChatModel:
         device: Optional[str] = None,
         model_kwargs: Optional[Dict[str, Any]] = None
     ):
+        # global logged_in
+        # if not logged_in:
+        #     login()
+        #     logged_in = True
+
         self.model_type = model_type
         self.model_name, self.architecture_type = model_type.value
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -38,8 +50,19 @@ class ChatModel:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             
         print(f"Loading model {self.model_name} on {self.device}...")
+        
+        quant_config = BitsAndBytesConfig(
+            # load_in_4bit=True,
+            # bnb_4bit_quant_type="nf4",
+            # bnb_4bit_compute_dtype=torch.float16,
+            # bnb_4bit_use_double_quant=True,
+            # llm_int8_enable_fp32_cpu_offload=True
+        )
+        
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
+            quantization_config=quant_config,
+            device_map="auto", 
             **self.model_kwargs
         ).to(self.device)
         
@@ -49,17 +72,39 @@ class ChatModel:
             "architecture_type": self.architecture_type,
             "model_name": self.model_name
         }
+
+    def cleanup(self):
+        try:
+            if hasattr(self, 'model'):
+                self.model.cpu()
+                del self.model
+                self.__dict__.pop('model', None)
+            
+            if hasattr(self, 'tokenizer'):
+                del self.tokenizer
+                self.__dict__.pop('tokenizer', None)
+            
+            gc.collect()
+            
+            if self.device == "cuda" or self.device.startswith("cuda:"):
+                with torch.no_grad():
+                    torch.cuda.empty_cache()
+                    torch.cuda.reset_peak_memory_stats()
+            
+            print(f"Cleaned up resources for {self.model_name}")
+        except Exception as e:
+            print(f"You're cooked {e}")
         
     def gen_text(
         self,
-        prompt: str,
+        input: str,
         max_length: int = 100,
         temperature: float = 0.7,
         top_p: float = 0.9,
         num_return_sequences: int = 1
     ) -> list[str]:
         inputs = self.tokenizer(
-            prompt,
+            input,
             return_tensors="pt",
             padding=True,
             truncation=True
@@ -84,9 +129,6 @@ class ChatModel:
         generated_texts = []
         for output in outputs:
             text = self.tokenizer.decode(output, skip_special_tokens=True)
-            # remove prompt
-            if text.startswith(prompt):
-                text = text[len(prompt):].strip()
             generated_texts.append(text)
             
         return generated_texts
@@ -96,12 +138,13 @@ class ChatModel:
         dataset,
         epochs: int = 3,
         batch_size: int = 4,
-        learning_rate: float = 5e-5,
+        learning_rate: float = 1e-5,
         warmup_steps: int = 0,
         save_steps: int = 0,
         output_dir: Optional[str] = None,
         **kwargs
     ):
+        print("hehehaw")
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
@@ -143,12 +186,19 @@ class ChatModel:
                 if save_steps > 0 and epoch % save_steps == 0 and output_dir:
                     self.save(os.path.join(output_dir, f"checkpoint-{epoch}"))
                     print(f"Saved checkpoint {epoch}")
-                        
+                
+                print(epoch_loss)
+                print(len(dataloader))
                 avg_loss = epoch_loss / len(dataloader)
                 print(f"Epoch {epoch + 1}/{epochs}, Average Loss: {avg_loss:.4f}")
             except KeyboardInterrupt:
                 print("Training interrupted..")
                 break
+            finally:
+                if save_steps == 0:
+                    self.save(output_dir=output_dir)
+                else:
+                    self.save(os.path.join(output_dir, f"final"))
             
         self.model.eval()
         
